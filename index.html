@@ -1,10 +1,159 @@
 <!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <title>Hello World</title>
-  </head>
-  <body>
-    <h1>Hello World</h1>
-  </body>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Hello World — Live BTC Price</title>
+  <style>
+    :root{
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+      --bg:#0f1724; --card:#0b1220; --accent:#f59e0b; --muted:#94a3b8;
+    }
+    body{
+      margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+      background:linear-gradient(180deg,#071029 0%, #071827 100%);
+      color:#e6eef8; padding:20px;
+    }
+    .card{
+      width:100%; max-width:560px; background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+      border-radius:16px; padding:20px; box-shadow:0 10px 30px rgba(2,6,23,0.6);
+      border:1px solid rgba(255,255,255,0.03);
+    }
+    h1{ margin:0 0 12px 0; font-size:1.6rem; letter-spacing:0.2px; }
+    p.lead{ margin:0 0 18px 0; color:var(--muted); }
+    .price-row{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    .price{
+      font-size:1.9rem; font-weight:700; color:#fff;
+    }
+    .meta{ color:var(--muted); font-size:0.9rem; }
+    .pill{ background:rgba(255,255,255,0.03); padding:6px 10px; border-radius:999px; font-weight:600; font-size:0.85rem; }
+    .small{ font-size:0.85rem; color:var(--muted); margin-top:10px; }
+    .error{ color:#ff7b7b; margin-top:10px; }
+    .loader{
+      width:18px; height:18px; border-radius:50%; border:3px solid rgba(255,255,255,0.08);
+      border-top-color:var(--accent); animation:spin 1s linear infinite; margin-left:8px;
+    }
+    @keyframes spin{ to{ transform:rotate(360deg) } }
+    footer{ margin-top:16px; font-size:0.85rem; color:var(--muted); text-align:right; }
+    @media (max-width:520px){ .price{ font-size:1.6rem } h1{ font-size:1.3rem } }
+  </style>
+</head>
+<body>
+  <main class="card" role="main">
+    <h1>Hello World 👋</h1>
+    <p class="lead">This page shows the live Bitcoin (BTC) price (USD) fetched from CoinGecko every 5 seconds.</p>
+
+    <div class="price-row" aria-live="polite">
+      <div>
+        <div class="pill">BTC / USD</div>
+        <div class="price" id="btc-price">--</div>
+        <div class="meta" id="price-meta">Last updated: --</div>
+      </div>
+      <div style="text-align:right">
+        <div id="change" class="meta small">—</div>
+        <div id="loader" class="loader" title="updating" style="display:none"></div>
+      </div>
+    </div>
+
+    <div id="error" class="error" role="alert" style="display:none"></div>
+
+    <footer>Source: CoinGecko • Updates every 5s</footer>
+  </main>
+
+  <script>
+    // Configuration
+    const COINGECKO_URL = 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true';
+    const REFRESH_MS = 5000; // milliseconds
+
+    // DOM elements
+    const priceEl = document.getElementById('btc-price');
+    const metaEl = document.getElementById('price-meta');
+    const errorEl = document.getElementById('error');
+    const changeEl = document.getElementById('change');
+    const loaderEl = document.getElementById('loader');
+
+    let lastPrice = null;
+
+    async function fetchPrice() {
+      try {
+        loaderEl.style.display = 'inline-block';
+        errorEl.style.display = 'none';
+
+        const resp = await fetch(COINGECKO_URL, { cache: "no-store" });
+        if (!resp.ok) throw new Error('API error: ' + resp.status);
+
+        const data = await resp.json();
+        if (!data.bitcoin || typeof data.bitcoin.usd !== 'number') {
+          throw new Error('Unexpected API response');
+        }
+
+        const price = data.bitcoin.usd;
+        const change24 = data.bitcoin.usd_24h_change; // may be undefined
+        updateUI(price, change24);
+      } catch (err) {
+        console.error(err);
+        errorEl.textContent = 'Failed to update price — ' + err.message;
+        errorEl.style.display = 'block';
+      } finally {
+        loaderEl.style.display = 'none';
+      }
+    }
+
+    function formatNumber(n) {
+      // show two decimals for large numbers; otherwise show up to 6 significant digits
+      if (n >= 1000) return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+      return n.toLocaleString(undefined, { maximumFractionDigits: 6 });
+    }
+
+    function updateUI(price, change24) {
+      const prev = lastPrice;
+      lastPrice = price;
+
+      priceEl.textContent = '$' + formatNumber(price);
+
+      const now = new Date();
+      metaEl.textContent = 'Last updated: ' + now.toLocaleString();
+
+      if (typeof change24 === 'number') {
+        const sign = change24 >= 0 ? '+' : '';
+        const pct = sign + change24.toFixed(2) + '% (24h)';
+        changeEl.textContent = pct;
+        changeEl.style.color = change24 >= 0 ? '#7ee787' : '#ff7b7b';
+      } else {
+        changeEl.textContent = '24h change: —';
+        changeEl.style.color = '';
+      }
+
+      // small flash animation for price change (green/red)
+      if (prev !== null && prev !== price) {
+        const up = price > prev;
+        const flash = document.createElement('div');
+        flash.style.position = 'fixed';
+        flash.style.pointerEvents = 'none';
+        flash.style.left = 0; flash.style.top = 0; flash.style.width = '100%'; flash.style.height = '100%';
+        flash.style.background = up ? 'rgba(34,197,94,0.06)' : 'rgba(239,68,68,0.06)';
+        flash.style.transition = 'opacity 600ms ease';
+        document.body.appendChild(flash);
+        setTimeout(()=> flash.style.opacity = '0', 20);
+        setTimeout(()=> flash.remove(), 700);
+      }
+    }
+
+    // initial fetch then interval
+    fetchPrice();
+    const intervalId = setInterval(fetchPrice, REFRESH_MS);
+
+    // optional: stop updates when page hidden to save bandwidth
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        clearInterval(intervalId);
+      } else {
+        // restart by reloading the page (simple and safe)
+        // or call fetchPrice() and set a new interval
+        fetchPrice();
+        // Note: for brevity we won't recreate interval here.
+      }
+    });
+  </script>
+</body>
 </html>
