@@ -1,159 +1,186 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html>
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Hello World — Live BTC Price</title>
-  <style>
-    :root{
-      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
-      --bg:#0f1724; --card:#0b1220; --accent:#f59e0b; --muted:#94a3b8;
-    }
-    body{
-      margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
-      background:linear-gradient(180deg,#071029 0%, #071827 100%);
-      color:#e6eef8; padding:20px;
-    }
-    .card{
-      width:100%; max-width:560px; background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
-      border-radius:16px; padding:20px; box-shadow:0 10px 30px rgba(2,6,23,0.6);
-      border:1px solid rgba(255,255,255,0.03);
-    }
-    h1{ margin:0 0 12px 0; font-size:1.6rem; letter-spacing:0.2px; }
-    p.lead{ margin:0 0 18px 0; color:var(--muted); }
-    .price-row{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
-    .price{
-      font-size:1.9rem; font-weight:700; color:#fff;
-    }
-    .meta{ color:var(--muted); font-size:0.9rem; }
-    .pill{ background:rgba(255,255,255,0.03); padding:6px 10px; border-radius:999px; font-weight:600; font-size:0.85rem; }
-    .small{ font-size:0.85rem; color:var(--muted); margin-top:10px; }
-    .error{ color:#ff7b7b; margin-top:10px; }
-    .loader{
-      width:18px; height:18px; border-radius:50%; border:3px solid rgba(255,255,255,0.08);
-      border-top-color:var(--accent); animation:spin 1s linear infinite; margin-left:8px;
-    }
-    @keyframes spin{ to{ transform:rotate(360deg) } }
-    footer{ margin-top:16px; font-size:0.85rem; color:var(--muted); text-align:right; }
-    @media (max-width:520px){ .price{ font-size:1.6rem } h1{ font-size:1.3rem } }
-  </style>
+    <meta charset="UTF-8">
+    <title>BTC Multi-Timeframe Candles + RSI Alerts</title>
+
+    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+
+    <style>
+        body {
+            font-family: Arial;
+            margin: 0;
+            background: #111;
+            color: #fff;
+        }
+        #chart { height: 420px; }
+        #rsiChart { height: 180px; }
+        .container { padding: 15px; text-align: center; }
+        button {
+            padding: 8px 18px;
+            margin: 5px;
+            background: #333;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+        }
+        .alert-box { margin-top: 15px; color: yellow; font-size: 18px; font-weight: bold; }
+    </style>
 </head>
+
 <body>
-  <main class="card" role="main">
-    <h1>Hello World 👋</h1>
-    <p class="lead">This page shows the live Bitcoin (BTC) price (USD) fetched from CoinGecko every 5 seconds.</p>
 
-    <div class="price-row" aria-live="polite">
-      <div>
-        <div class="pill">BTC / USD</div>
-        <div class="price" id="btc-price">--</div>
-        <div class="meta" id="price-meta">Last updated: --</div>
-      </div>
-      <div style="text-align:right">
-        <div id="change" class="meta small">—</div>
-        <div id="loader" class="loader" title="updating" style="display:none"></div>
-      </div>
-    </div>
+<div class="container">
+    <h2>BTC Chart + RSI-14 + Timeframes + Alerts</h2>
 
-    <div id="error" class="error" role="alert" style="display:none"></div>
+    <button onclick="loadCandles('5m')">5 Min</button>
+    <button onclick="loadCandles('15m')">15 Min</button>
+    <button onclick="loadCandles('1h')">1 Hour</button>
 
-    <footer>Source: CoinGecko • Updates every 5s</footer>
-  </main>
+    <br><br>
 
-  <script>
-    // Configuration
-    const COINGECKO_URL = 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true';
-    const REFRESH_MS = 5000; // milliseconds
+    RSI High (&gt;): <input type="number" id="alertHigh" value="70">
+    RSI Low (&lt;): <input type="number" id="alertLow" value="30">
+    <button onclick="setAlerts()">Set RSI Alerts</button>
 
-    // DOM elements
-    const priceEl = document.getElementById('btc-price');
-    const metaEl = document.getElementById('price-meta');
-    const errorEl = document.getElementById('error');
-    const changeEl = document.getElementById('change');
-    const loaderEl = document.getElementById('loader');
+    <div id="alertMessage" class="alert-box"></div>
 
-    let lastPrice = null;
+    <div id="chart"></div>
+    <div id="rsiChart"></div>
+</div>
 
-    async function fetchPrice() {
-      try {
-        loaderEl.style.display = 'inline-block';
-        errorEl.style.display = 'none';
+<script>
+    let alertHigh = 70;
+    let alertLow = 30;
 
-        const resp = await fetch(COINGECKO_URL, { cache: "no-store" });
-        if (!resp.ok) throw new Error('API error: ' + resp.status);
+    const alertSound = new Audio("https://actions.google.com/sounds/v1/alarms/beep_short.ogg");
 
-        const data = await resp.json();
-        if (!data.bitcoin || typeof data.bitcoin.usd !== 'number') {
-          throw new Error('Unexpected API response');
+    function setAlerts() {
+        alertHigh = parseFloat(document.getElementById("alertHigh").value);
+        alertLow = parseFloat(document.getElementById("alertLow").value);
+
+        document.getElementById("alertMessage").innerHTML =
+            "Alerts updated: RSI > " + alertHigh + " OR RSI < " + alertLow;
+    }
+
+    // --------------------- MAIN CHART ---------------------
+    const chart = LightweightCharts.createChart(document.getElementById("chart"), {
+        width: window.innerWidth - 40,
+        height: 420,
+        layout: { background: { color: '#111' }, textColor: '#fff' },
+        grid: { vertLines: { color: '#333' }, horzLines: { color: '#333' } }
+    });
+
+    const candleSeries = chart.addCandlestickSeries();
+
+    // --------------------- RSI CHART ---------------------
+    const rsiChart = LightweightCharts.createChart(document.getElementById("rsiChart"), {
+        width: window.innerWidth - 40,
+        height: 180,
+        layout: { background: { color: '#111' }, textColor: '#fff' },
+        grid: { vertLines: { color: '#333' }, horzLines: { color: '#333' } }
+    });
+
+    const rsiSeries = rsiChart.addLineSeries({
+        color: '#00bfff',
+        lineWidth: 2
+    });
+
+    // --------------- CALCULATE RSI-14 ---------------
+    function calculateRSI(closes, period = 14) {
+        let rsi = [];
+        let gains = 0, losses = 0;
+
+        for (let i = 1; i <= period; i++) {
+            let diff = closes[i] - closes[i - 1];
+            if (diff >= 0) gains += diff;
+            else losses -= diff;
         }
 
-        const price = data.bitcoin.usd;
-        const change24 = data.bitcoin.usd_24h_change; // may be undefined
-        updateUI(price, change24);
-      } catch (err) {
-        console.error(err);
-        errorEl.textContent = 'Failed to update price — ' + err.message;
-        errorEl.style.display = 'block';
-      } finally {
-        loaderEl.style.display = 'none';
-      }
+        gains /= period;
+        losses /= period;
+
+        rsi.push(100 - (100 / (1 + gains / losses)));
+
+        for (let i = period + 1; i < closes.length; i++) {
+            let diff = closes[i] - closes[i - 1];
+            let gain = diff > 0 ? diff : 0;
+            let loss = diff < 0 ? -diff : 0;
+
+            gains = (gains * (period - 1) + gain) / period;
+            losses = (losses * (period - 1) + loss) / period;
+
+            rsi.push(100 - (100 / (1 + gains / losses)));
+        }
+
+        return rsi;
     }
 
-    function formatNumber(n) {
-      // show two decimals for large numbers; otherwise show up to 6 significant digits
-      if (n >= 1000) return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
-      return n.toLocaleString(undefined, { maximumFractionDigits: 6 });
+    // -------------------  CUSTOM ALERTS -------------------
+    function checkRsiAlerts(rsi) {
+        if (rsi > alertHigh) {
+            document.getElementById("alertMessage").innerHTML =
+                "⚠️ RSI Overbought Alert (" + rsi.toFixed(2) + ")";
+            alertSound.play();
+        }
+
+        if (rsi < alertLow) {
+            document.getElementById("alertMessage").innerHTML =
+                "⚠️ RSI Oversold Alert (" + rsi.toFixed(2) + ")";
+            alertSound.play();
+        }
     }
 
-    function updateUI(price, change24) {
-      const prev = lastPrice;
-      lastPrice = price;
-
-      priceEl.textContent = '$' + formatNumber(price);
-
-      const now = new Date();
-      metaEl.textContent = 'Last updated: ' + now.toLocaleString();
-
-      if (typeof change24 === 'number') {
-        const sign = change24 >= 0 ? '+' : '';
-        const pct = sign + change24.toFixed(2) + '% (24h)';
-        changeEl.textContent = pct;
-        changeEl.style.color = change24 >= 0 ? '#7ee787' : '#ff7b7b';
-      } else {
-        changeEl.textContent = '24h change: —';
-        changeEl.style.color = '';
-      }
-
-      // small flash animation for price change (green/red)
-      if (prev !== null && prev !== price) {
-        const up = price > prev;
-        const flash = document.createElement('div');
-        flash.style.position = 'fixed';
-        flash.style.pointerEvents = 'none';
-        flash.style.left = 0; flash.style.top = 0; flash.style.width = '100%'; flash.style.height = '100%';
-        flash.style.background = up ? 'rgba(34,197,94,0.06)' : 'rgba(239,68,68,0.06)';
-        flash.style.transition = 'opacity 600ms ease';
-        document.body.appendChild(flash);
-        setTimeout(()=> flash.style.opacity = '0', 20);
-        setTimeout(()=> flash.remove(), 700);
-      }
+    function checkRsiGreenCandleAlert(rsi, candle) {
+        if (rsi <= 60 && candle.close > candle.open) {
+            document.getElementById("alertMessage").innerHTML =
+                "🟢 RSI ≤ 60 + GREEN Candle (RSI: " + rsi.toFixed(2) + ")";
+            alertSound.play();
+        }
     }
 
-    // initial fetch then interval
-    fetchPrice();
-    const intervalId = setInterval(fetchPrice, REFRESH_MS);
+    // ------------------- LOAD CHART DATA -------------------
+    async function loadCandles(interval) {
+        const url =
+            `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=${interval}&limit=500`;
 
-    // optional: stop updates when page hidden to save bandwidth
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) {
-        clearInterval(intervalId);
-      } else {
-        // restart by reloading the page (simple and safe)
-        // or call fetchPrice() and set a new interval
-        fetchPrice();
-        // Note: for brevity we won't recreate interval here.
-      }
+        const response = await fetch(url);
+        const data = await response.json();
+
+        const candles = data.map(c => ({
+            time: c[0] / 1000,
+            open: parseFloat(c[1]),
+            high: parseFloat(c[2]),
+            low: parseFloat(c[3]),
+            close: parseFloat(c[4])
+        }));
+
+        candleSeries.setData(candles);
+
+        const closes = candles.map(c => c.close);
+        const rsiValues = calculateRSI(closes, 14);
+
+        const rsiPlot = candles.slice(14).map((c, i) => ({
+            time: c.time,
+            value: rsiValues[i]
+        }));
+
+        rsiSeries.setData(rsiPlot);
+
+        const lastCandle = candles[candles.length - 1];
+        const lastRSI = rsiValues[rsiValues.length - 1];
+
+        checkRsiAlerts(lastRSI);
+        checkRsiGreenCandleAlert(lastRSI, lastCandle);
+    }
+
+    loadCandles("5m");
+
+    window.addEventListener("resize", () => {
+        chart.applyOptions({ width: window.innerWidth - 40 });
+        rsiChart.applyOptions({ width: window.innerWidth - 40 });
     });
-  </script>
+</script>
+
 </body>
 </html>
